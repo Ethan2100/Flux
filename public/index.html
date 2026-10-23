@@ -24,7 +24,7 @@
     .volt-error { background: #3a1518; color: #ffb3b3; }
   }
   /* your CSS (## lines) */
-  body { background: #000; color: #fafafa; font-family: -apple-system, Helvetica, Arial, sans-serif; max-width: 420px; margin: 0 auto; padding: 0 0 40px; }
+  body { background: #000; color: #fafafa; font-family: -apple-system, Helvetica, Arial, sans-serif; max-width: 420px; margin: 0 auto; padding: 0 0 70px; }
   h1 { display: none; }
   .bar { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid #262626; position: sticky; top: 0; background: #000; z-index: 1; }
   .bar .logo { font-size: 24px; font-weight: 700; font-family: cursive; }
@@ -94,6 +94,20 @@
   .snav { position: absolute; top: 0; bottom: 0; width: 35%; }
   .snav.prev { left: 0; } .snav.next { right: 0; }
   .sempty { color: #a8a8a8; text-align: center; padding: 40px; }
+  .bottomnav { position: fixed; bottom: 0; left: 0; right: 0; display: flex; max-width: 420px; margin: 0 auto; background: #000; border-top: 1px solid #262626; z-index: 2; }
+  .navbtn { all: unset; flex: 1; text-align: center; padding: 12px 0; cursor: pointer; font-size: 22px; color: #a8a8a8; }
+  .navbtn.active { color: #fff; }
+  .searchbox { padding: 14px 16px; }
+  .searchbox input { width: 100%; box-sizing: border-box; background: #121212; border: 1px solid #333; color: #fff; padding: 10px; border-radius: 8px; font-size: 14px; }
+  .searchresult { display: flex; align-items: center; gap: 12px; padding: 10px 16px; cursor: pointer; }
+  .searchresult .avatar { width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0; }
+  .searchresult .sru { font-weight: 600; font-size: 14px; }
+  .searchresult .srb { font-size: 12px; color: #a8a8a8; }
+  .profilestats { display: flex; gap: 24px; padding: 0 16px 14px; }
+  .profilestats div { font-size: 13px; color: #d7d7d7; }
+  .profilestats b { display: block; font-size: 16px; color: #fff; }
+  .followbtn { padding: 8px 20px; background: #0095f6; color: #fff; border: none; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .followbtn.following { background: #262626; }
 </style>
 </head>
 <body>
@@ -463,17 +477,35 @@ async function __main() {
   `
   app.appendChild(head)
   
-  const meta = document.createElement('div')
-  meta.className = 'profilemeta'
-  meta.textContent = profile.post_count + (profile.post_count === 1 ? ' post' : ' posts')
-  app.appendChild(meta)
+  const stats = document.createElement('div')
+  stats.className = 'profilestats'
+  stats.innerHTML = `
+  <div><b>${profile.post_count}</b>${profile.post_count === 1 ? 'post' : 'posts'}</div>
+  <div><b>${profile.follower_count}</b>followers</div>
+  <div><b>${profile.following_count}</b>following</div>
+  `
+  app.appendChild(stats)
   
-  if (me && me.username === profile.username) {
   const actions = document.createElement('div')
   actions.className = 'profileactions'
+  if (me && me.username === profile.username) {
   actions.innerHTML = `<button id='editProfileBtn'>Edit profile</button>`
   app.appendChild(actions)
   document.getElementById('editProfileBtn').onclick = () => goTo({ type: 'settings' })
+  } else if (me) {
+  actions.innerHTML = `<button class='followbtn${profile.is_following ? ' following' : ''}' id='followBtn'>${profile.is_following ? 'Following' : 'Follow'}</button>`
+  app.appendChild(actions)
+  document.getElementById('followBtn').onclick = async () => {
+  const btn = document.getElementById('followBtn')
+  const result = await api('/api/users/' + encodeURIComponent(profile.username) + '/follow', { method: 'POST' })
+  btn.textContent = result.following ? 'Following' : 'Follow'
+  btn.classList.toggle('following', result.following)
+  stats.innerHTML = `
+  <div><b>${profile.post_count}</b>${profile.post_count === 1 ? 'post' : 'posts'}</div>
+  <div><b>${result.follower_count}</b>followers</div>
+  <div><b>${profile.following_count}</b>following</div>
+  `
+  }
   }
   
   const posts = await api('/api/users/' + encodeURIComponent(username) + '/posts')
@@ -592,15 +624,78 @@ async function __main() {
   }
   }
   
+  function renderSearchView(app) {
+  const box = document.createElement('div')
+  box.className = 'searchbox'
+  box.innerHTML = `<input id='searchInput' type='text' placeholder='Search users'>`
+  app.appendChild(box)
+  const results = document.createElement('div')
+  results.id = 'searchResults'
+  app.appendChild(results)
+  
+  let t = null
+  document.getElementById('searchInput').oninput = (e) => {
+  if (t) clearTimeout(t)
+  const q = e.target.value.trim()
+  t = setTimeout(async () => {
+  results.innerHTML = ''
+  if (!q) return
+  const users = await api('/api/search/users?q=' + encodeURIComponent(q))
+  if (!users.length) {
+  results.innerHTML = "<div class='empty'>No users found.</div>"
+  return
+  }
+  users.forEach((u) => {
+  const row = document.createElement('div')
+  row.className = 'searchresult'
+  row.innerHTML = `
+  <div class='avatar' style='border-radius:50%'>${avatarHtml(u.username, u.has_avatar)}</div>
+  <div><div class='sru'>${esc(u.username)}</div><div class='srb'>${esc(u.bio || '')}</div></div>
+  `
+  row.onclick = () => goTo({ type: 'profile', username: u.username })
+  results.appendChild(row)
+  })
+  }, 250)
+  }
+  document.getElementById('searchInput').focus()
+  }
+  
+  function renderBottomNav() {
+  let nav = document.getElementById('bottomnav')
+  if (!nav) {
+  nav = document.createElement('div')
+  nav.id = 'bottomnav'
+  nav.className = 'bottomnav'
+  nav.innerHTML = `
+  <button class='navbtn' id='navHome'>&#8962;</button>
+  <button class='navbtn' id='navSearch'>&#128269;</button>
+  <button class='navbtn' id='navProfile'>&#128100;</button>
+  `
+  document.body.appendChild(nav)
+  document.getElementById('navHome').onclick = () => goTo({ type: 'feed' })
+  document.getElementById('navSearch').onclick = () => goTo({ type: 'search' })
+  document.getElementById('navProfile').onclick = () => {
+  if (me) goTo({ type: 'profile', username: me.username })
+  else goTo({ type: 'auth', mode: 'login' })
+  }
+  }
+  const map = { feed: 'navHome', search: 'navSearch', profile: 'navProfile' }
+  nav.querySelectorAll('.navbtn').forEach((b) => b.classList.remove('active'))
+  const activeId = map[view.type]
+  if (activeId) document.getElementById(activeId).classList.add('active')
+  }
+  
   async function renderApp() {
   const app = document.getElementById('app')
   app.innerHTML = ''
+  renderBottomNav()
   if (view.type === 'auth') { renderAuth(app, view.mode); return }
   if (view.type === 'settings') {
   if (!me) { goTo({ type: 'auth', mode: 'login' }); return }
   renderSettingsView(app)
   return
   }
+  if (view.type === 'search') { renderSearchView(app); return }
   if (view.type === 'profile') { renderProfileView(app, view.username); return }
   renderFeedView(app)
   }
