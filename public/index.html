@@ -70,6 +70,8 @@
   .settingsrow { padding: 16px; border-bottom: 1px solid #262626; }
   .settingsrow h3 { font-size: 14px; margin: 0 0 10px; }
   .settingsrow label { display: block; font-size: 12px; color: #a8a8a8; margin-bottom: 4px; }
+  .settingsrow input[type=text], .settingsrow input[type=password] { width: 100%; box-sizing: border-box; background: #121212; border: 1px solid #333; color: #fff; padding: 10px; border-radius: 6px; margin-bottom: 10px; font-size: 14px; }
+  .settingsrow button { padding: 10px 20px; background: #0095f6; color: #fff; border: none; border-radius: 8px; font-weight: 600; font-size: 14px; cursor: pointer; }
   .settingsrow .ok { color: #2ecc71; font-size: 13px; margin-top: 6px; }
   .avatarpick { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; }
   .avatarpick .avatar { width: 56px; height: 56px; }
@@ -108,6 +110,24 @@
   .profilestats b { display: block; font-size: 16px; color: #fff; }
   .followbtn { padding: 8px 20px; background: #0095f6; color: #fff; border: none; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; }
   .followbtn.following { background: #262626; }
+  .msgbtn { padding: 8px 20px; background: #262626; color: #fff; border: none; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; margin-left: 8px; }
+  .dmicon { all: unset; cursor: pointer; position: relative; font-size: 18px; padding: 2px; }
+  .dmicon .badge { position: absolute; top: -4px; right: -6px; background: #ed4956; color: #fff; font-size: 10px; min-width: 15px; height: 15px; border-radius: 8px; display: flex; align-items: center; justify-content: center; padding: 0 3px; }
+  .inboxrow { display: flex; align-items: center; gap: 12px; padding: 12px 16px; cursor: pointer; border-bottom: 1px solid #141414; }
+  .inboxrow .avatar { width: 48px; height: 48px; border-radius: 50%; flex-shrink: 0; }
+  .inboxrow .iru { font-weight: 600; font-size: 14px; }
+  .inboxrow .irp { font-size: 13px; color: #a8a8a8; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .inboxrow .irp.unread { color: #fff; font-weight: 600; }
+  .inboxrow .irbadge { margin-left: auto; background: #0095f6; color: #fff; font-size: 11px; min-width: 18px; height: 18px; border-radius: 9px; display: flex; align-items: center; justify-content: center; padding: 0 4px; }
+  .threadbar { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid #262626; }
+  .threadbar .avatar { width: 32px; height: 32px; border-radius: 50%; }
+  .threadmsgs { padding: 14px 16px; min-height: 300px; display: flex; flex-direction: column; gap: 8px; }
+  .bubble { max-width: 75%; padding: 9px 13px; border-radius: 18px; font-size: 14px; line-height: 1.35; word-wrap: break-word; }
+  .bubble.them { background: #262626; align-self: flex-start; }
+  .bubble.me { background: #0095f6; align-self: flex-end; }
+  .threadinput { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid #262626; position: sticky; bottom: 70px; background: #000; }
+  .threadinput input { flex: 1; background: #121212; border: 1px solid #333; color: #fff; padding: 10px 14px; border-radius: 20px; font-size: 14px; }
+  .threadinput button { padding: 10px 16px; background: #0095f6; color: #fff; border: none; border-radius: 20px; font-weight: 600; font-size: 13px; cursor: pointer; }
 </style>
 </head>
 <body>
@@ -179,20 +199,39 @@ async function __main() {
   return `<div class=\"initial\">${esc(initial)}</div>`
   }
   
+  let pollTimer = null
+  function stopPolling() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+  }
+  
   function goTo(next) {
+  stopPolling()
   view = next
   renderApp()
   window.scrollTo(0, 0)
+  }
+  
+  async function refreshUnreadBadge() {
+  if (!me) return
+  const badge = document.getElementById('dmBadge')
+  if (!badge) return
+  try {
+  const r = await api('/api/conversations/unread-count')
+  badge.textContent = r.count > 0 ? String(r.count) : ''
+  badge.style.display = r.count > 0 ? 'flex' : 'none'
+  } catch (e) {}
   }
   
   function renderWho() {
   const box = document.getElementById('whobox')
   if (me) {
   box.innerHTML = `
+  <button class=\"dmicon\" id=\"dmBtn\">&#9993;<span class=\"badge\" id=\"dmBadge\" style=\"display:none\"></span></button>
   <div class=\"avatar\" id=\"whoAvatar\" style=\"width:28px;height:28px;border-radius:50%\">${avatarHtml(me.username, me.has_avatar)}</div>
   <button id=\"settingsBtn\">Settings</button>
   <button id=\"logoutBtn\">Log out</button>
   `
+  document.getElementById('dmBtn').onclick = () => goTo({ type: 'inbox' })
   document.getElementById('whoAvatar').onclick = () => goTo({ type: 'profile', username: me.username })
   document.getElementById('settingsBtn').onclick = () => goTo({ type: 'settings' })
   document.getElementById('logoutBtn').onclick = async () => {
@@ -201,6 +240,7 @@ async function __main() {
   renderWho()
   goTo({ type: 'feed' })
   }
+  refreshUnreadBadge()
   } else {
   box.innerHTML = '<button id=\"loginBtn\">Log in / Sign up</button>'
   document.getElementById('loginBtn').onclick = () => goTo({ type: 'auth', mode: 'login' })
@@ -493,8 +533,12 @@ async function __main() {
   app.appendChild(actions)
   document.getElementById('editProfileBtn').onclick = () => goTo({ type: 'settings' })
   } else if (me) {
-  actions.innerHTML = `<button class='followbtn${profile.is_following ? ' following' : ''}' id='followBtn'>${profile.is_following ? 'Following' : 'Follow'}</button>`
+  actions.innerHTML = `
+  <button class='followbtn${profile.is_following ? ' following' : ''}' id='followBtn'>${profile.is_following ? 'Following' : 'Follow'}</button>
+  <button class='msgbtn' id='msgBtn'>Message</button>
+  `
   app.appendChild(actions)
+  document.getElementById('msgBtn').onclick = () => goTo({ type: 'thread', username: profile.username })
   document.getElementById('followBtn').onclick = async () => {
   const btn = document.getElementById('followBtn')
   const result = await api('/api/users/' + encodeURIComponent(profile.username) + '/follow', { method: 'POST' })
@@ -685,6 +729,94 @@ async function __main() {
   if (activeId) document.getElementById(activeId).classList.add('active')
   }
   
+  function timeAgo(iso) {
+  const diff = Math.max(0, Date.now() - new Date(iso).getTime())
+  const mins = Math.floor(diff / 60000)
+  if (mins < 1) return 'now'
+  if (mins < 60) return mins + 'm'
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return hrs + 'h'
+  return Math.floor(hrs / 24) + 'd'
+  }
+  
+  async function renderInboxView(app) {
+  if (!me) { goTo({ type: 'auth', mode: 'login' }); return }
+  const convos = await api('/api/conversations')
+  if (!convos.length) {
+  app.innerHTML = "<div class='empty'>No messages yet. Visit someone's profile and tap Message.</div>"
+  return
+  }
+  convos.forEach((c) => {
+  const row = document.createElement('div')
+  row.className = 'inboxrow'
+  row.innerHTML = `
+  <div class='avatar' style='border-radius:50%'>${avatarHtml(c.username, c.has_avatar)}</div>
+  <div>
+  <div class='iru'>${esc(c.username)}</div>
+  <div class='irp${c.unread_count > 0 ? ' unread' : ''}'>${esc(c.last_body)} &middot; ${timeAgo(c.last_at)}</div>
+  </div>
+  ${c.unread_count > 0 ? `<div class='irbadge'>${c.unread_count}</div>` : ''}
+  `
+  row.onclick = () => goTo({ type: 'thread', username: c.username })
+  app.appendChild(row)
+  })
+  }
+  
+  async function renderThreadView(app, username) {
+  if (!me) { goTo({ type: 'auth', mode: 'login' }); return }
+  const bar = document.createElement('div')
+  bar.className = 'threadbar'
+  bar.innerHTML = `
+  <span class='backbar' id='threadBack' style='padding:0;border:none'>&lt;</span>
+  <div class='avatar' style='border-radius:50%'>${avatarHtml(username, true)}</div>
+  <div class='uname'>${esc(username)}</div>
+  `
+  app.appendChild(bar)
+  document.getElementById('threadBack').onclick = () => goTo({ type: 'inbox' })
+  
+  const msgsBox = document.createElement('div')
+  msgsBox.className = 'threadmsgs'
+  msgsBox.id = 'threadMsgs'
+  app.appendChild(msgsBox)
+  
+  const inputBar = document.createElement('div')
+  inputBar.className = 'threadinput'
+  inputBar.innerHTML = `<input id='threadInput' type='text' placeholder='Message...' maxlength='1000'><button id='threadSend'>Send</button>`
+  app.appendChild(inputBar)
+  
+  async function load(scroll) {
+  let msgs
+  try { msgs = await api('/api/conversations/' + encodeURIComponent(username)) } catch (e) { msgs = [] }
+  msgsBox.innerHTML = ''
+  msgs.forEach((m) => {
+  const b = document.createElement('div')
+  b.className = 'bubble ' + (m.from_me ? 'me' : 'them')
+  b.textContent = m.body
+  msgsBox.appendChild(b)
+  })
+  refreshUnreadBadge()
+  if (scroll) window.scrollTo(0, document.body.scrollHeight)
+  }
+  
+  async function send() {
+  const input = document.getElementById('threadInput')
+  const body = input.value.trim()
+  if (!body) return
+  input.value = ''
+  try {
+  await api('/api/conversations/' + encodeURIComponent(username), { method: 'POST', body: JSON.stringify({ body }) })
+  await load(true)
+  } catch (e) {
+  alert(e.message)
+  }
+  }
+  document.getElementById('threadSend').onclick = send
+  document.getElementById('threadInput').onkeydown = (e) => { if (e.key === 'Enter') send() }
+  
+  await load(true)
+  pollTimer = setInterval(() => load(false), 3000)
+  }
+  
   async function renderApp() {
   const app = document.getElementById('app')
   app.innerHTML = ''
@@ -696,6 +828,8 @@ async function __main() {
   return
   }
   if (view.type === 'search') { renderSearchView(app); return }
+  if (view.type === 'inbox') { renderInboxView(app); return }
+  if (view.type === 'thread') { renderThreadView(app, view.username); return }
   if (view.type === 'profile') { renderProfileView(app, view.username); return }
   renderFeedView(app)
   }
@@ -705,6 +839,7 @@ async function __main() {
   renderWho()
   document.getElementById('logoLink').onclick = () => goTo({ type: 'feed' })
   renderApp()
+  if (me) setInterval(refreshUnreadBadge, 15000)
   }
   init()
 }
